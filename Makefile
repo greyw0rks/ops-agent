@@ -1,4 +1,4 @@
-.PHONY: help db-up db-down install init-db seed api simulate test lint preflight
+.PHONY: help db-up db-down install init-db seed api simulate test lint preflight web web-install web-build
 
 help:
 	@echo "make db-up      - start Postgres (docker compose)"
@@ -10,6 +10,8 @@ help:
 	@echo "make preflight  - check this machine can reach Bedrock"
 	@echo "make test       - run the test suite"
 	@echo "make lint       - ruff check"
+	@echo "make web-install- install the dashboard's deps"
+	@echo "make web        - run the dashboard on :3010"
 
 db-up:
 	docker compose up -d postgres
@@ -47,3 +49,12 @@ test:
 
 lint:
 	cd backend && .venv/bin/ruff check app scripts tests
+
+web-install:
+	cd frontend && npm install
+
+web:
+	cd frontend && npm run dev
+
+web-build:
+	cd frontend && npm run build && npm run lint

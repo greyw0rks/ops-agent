@@ -53,6 +53,11 @@ def _allow(risk: RiskLevel, reason: str, basis: str | None = None) -> Ruling:
     return Ruling(decision=PolicyDecision.ALLOW, risk_level=risk, reason=reason, policy_basis=basis)
 
 
+def _plain(value: float) -> str:
+    """Policy numbers are read by a person, so 5000 rather than 5000.0."""
+    return f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
+
+
 def evaluate(
     db: Session,
     business_id: str,
@@ -154,7 +159,7 @@ def _rule_refund(
             risk,
             f"{business.currency} {amount:,.2f} is under the "
             f"{business.currency} {auto_below:,.2f} the owner pre-authorised.",
-            basis=f"refund auto-approve below {auto_below}",
+            basis=f"refund auto-approve below {business.currency} {_plain(auto_below)}",
         )
 
     if approval_below and amount > approval_below:
@@ -166,7 +171,7 @@ def _rule_refund(
                 f"{business.currency} {approval_below:,.2f} ceiling the owner delegated. "
                 "Open a task for the owner to handle this personally instead."
             ),
-            policy_basis=f"refunds above {approval_below} are manual review only",
+            policy_basis=f"refunds above {business.currency} {_plain(approval_below)} are manual review only",
         )
 
     return Ruling(
@@ -176,7 +181,10 @@ def _rule_refund(
             f"{business.currency} {amount:,.2f} is above the "
             f"{business.currency} {auto_below:,.2f} auto-approval limit, so it needs the owner."
         ),
-        policy_basis=f"refund approval band: {auto_below}–{approval_below}",
+        policy_basis=(
+            f"refund approval band: {business.currency} {_plain(auto_below)}"
+            f"–{_plain(approval_below)}"
+        ),
         title=title,
         recommended_action=recommended,
         amount=amount,
@@ -228,7 +236,7 @@ def _rule_discount(
         return _allow(
             risk,
             f"{percent:g}% is within the {auto_percent:g}% the owner pre-authorised.",
-            basis=f"discount auto-approve up to {auto_percent}%",
+            basis=f"discount auto-approve up to {_plain(auto_percent)}%",
         )
 
     if approval_percent and percent > approval_percent:
@@ -239,14 +247,14 @@ def _rule_discount(
                 f"{percent:g}% is beyond the {approval_percent:g}% ceiling the owner delegated. "
                 "Open a task for the owner instead."
             ),
-            policy_basis=f"discounts above {approval_percent}% are manual review only",
+            policy_basis=f"discounts above {_plain(approval_percent)}% are manual review only",
         )
 
     return Ruling(
         decision=PolicyDecision.REQUIRE_APPROVAL,
         risk_level=risk,
         reason=f"{percent:g}% is above the {auto_percent:g}% auto-approval limit.",
-        policy_basis=f"discount approval band: {auto_percent}%–{approval_percent}%",
+        policy_basis=f"discount approval band: {_plain(auto_percent)}%–{_plain(approval_percent)}%",
         title=f"{percent:g}% discount — {booking.reference}",
         recommended_action=(
             f"Apply a {percent:g}% discount to {booking.reference}, "
@@ -292,7 +300,7 @@ def _rule_cancel(
             f"{fee_percent:g}% fee ({business.currency} {fee:,.2f}) applies. "
             "Waiving or charging it is the owner's call."
         ),
-        policy_basis=f"late cancellation fee: {fee_percent}% inside {free_hours}h",
+        policy_basis=f"late cancellation fee: {_plain(fee_percent)}% inside {free_hours}h",
         title=f"Late cancellation — {booking.reference}",
         recommended_action=(
             f"Cancel {booking.reference} with {hours_notice:.0f}h notice and "

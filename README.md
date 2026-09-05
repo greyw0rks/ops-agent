@@ -152,8 +152,11 @@ cp .env.example .env      # then set the model provider, see below
 make db-up                # Postgres on :5437
 make install              # backend deps into backend/.venv
 make init-db              # create the schema
-make seed                 # BrightHome Services + customers + two live threads
+make seed                 # BrightHome Services + customers + three live threads
 make api                  # http://localhost:8010/docs
+
+make web-install          # dashboard deps
+make web                  # http://localhost:3010
 ```
 
 ### Model provider
@@ -357,9 +360,11 @@ ops-agent/
 │   │   ├── services/       the only code that touches Postgres
 │   │   ├── api/            FastAPI routes: events, approvals, dashboard data
 │   │   └── db/             models, enums, session
-│   ├── scripts/            init_db, seed, simulate_event, worker
+│   ├── scripts/            init_db, seed, simulate_event, worker, preflight_bedrock
 │   └── tests/              59 tests: policy, bookings, pricing, gate, conversations
-├── docs/                   architecture, tools, workflows, demo script
+├── frontend/               Next.js dashboard — Today, Decisions, Activity, Rules
+├── infrastructure/aws/     scoped IAM policy and the Bedrock notes
+├── docs/                   architecture, design, tools, workflows, demo script
 └── docker-compose.yml      Postgres
 ```
 
@@ -399,10 +404,16 @@ Working and verified end to end: the booking, reschedule, complaint/refund and
 follow-up journeys; the approval pause and resume, including rejection with the owner's
 reasoning; the audit trail; the policy engine and its API.
 
-Still to come: the web dashboard (the API serves it already), Bedrock and AgentCore
-deployment, EventBridge scheduling, and the supplier-invoice journey end to end —
-`record_supplier_invoice` exists and is tested, but document extraction from S3 is not
-wired up yet.
+Still to come: Bedrock and AgentCore deployment, EventBridge scheduling, and the
+supplier-invoice journey end to end — `record_supplier_invoice` exists and is tested,
+but document extraction from S3 is not wired up yet.
+
+On Bedrock specifically: credentials and the control plane work, but Anthropic and
+OpenAI models are refused from this project's location by the providers' own country
+policies, and the remaining models need a wider IAM grant than was first attached.
+`make preflight` reports exactly which of those four things is in the way. The agent
+runs on any Anthropic-compatible endpoint meanwhile, and switching is one variable —
+see [infrastructure/aws](infrastructure/aws/README.md).
 
 ## License
 

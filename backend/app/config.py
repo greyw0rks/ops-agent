@@ -63,7 +63,9 @@ class Settings(BaseSettings):
     # --- api ---
     api_host: str = "0.0.0.0"
     api_port: int = 8010
-    cors_origins: str = "http://localhost:3000"
+    # The dashboard dev server runs on 3010; 3000 is included because it is what a
+    # bare `next dev` picks and someone will inevitably run it that way.
+    cors_origins: str = "http://localhost:3010,http://localhost:3000"
     log_level: str = "INFO"
     # Shared secret for the owner-facing API. When empty the API is unauthenticated,
     # which is fine for a local demo and not fine anywhere else — `main.py` warns
