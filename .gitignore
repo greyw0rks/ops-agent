@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env
+.env
+.env.local
+.env.*
+!.env.example
+
+# Agent session state (Strands SessionManager)
+backend/.sessions/
+.sessions/
+
+# Node / Next
+node_modules/
+.next/
+out/
+frontend/.vercel/
+
+# Data / logs
+*.log
+*.sqlite
+*.db
+pgdata/
+
+# OS
+.DS_Store
