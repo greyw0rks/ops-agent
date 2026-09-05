@@ -1,4 +1,4 @@
-.PHONY: help db-up db-down install init-db seed api simulate test lint dev-frontend
+.PHONY: help db-up db-down install init-db seed api simulate test lint preflight
 
 help:
 	@echo "make db-up      - start Postgres (docker compose)"
@@ -7,6 +7,7 @@ help:
 	@echo "make seed       - seed the BrightHome Services demo business"
 	@echo "make api        - run the FastAPI server"
 	@echo "make simulate   - send a simulated customer message to the agent"
+	@echo "make preflight  - check this machine can reach Bedrock"
 	@echo "make test       - run the test suite"
 	@echo "make lint       - ruff check"
 
@@ -38,11 +39,11 @@ worker:
 simulate:
 	cd backend && .venv/bin/python -m scripts.simulate_event $(ARGS)
 
+preflight:
+	cd backend && .venv/bin/python -m scripts.preflight_bedrock --list --invoke
+
 test:
 	cd backend && .venv/bin/python -m pytest -q
 
 lint:
 	cd backend && .venv/bin/ruff check app scripts tests
-
-dev-frontend:
-	cd frontend && npm run dev
