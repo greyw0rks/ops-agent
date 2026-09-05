@@ -144,6 +144,40 @@ rejected this. Their reason: half was fair, offer a re-clean instead"*. The diff
 in behaviour is large: without it the agent knows only that it was blocked, and tends
 to go quiet on the customer.
 
+**An interrupt is re-execution, not continuation.** The SDK is explicit about this: on
+resume the handler runs again from the top and only `interrupt()` returns early with the
+stored answer. So everything the gate does before returning `Confirm` — write the
+approval, write the action row, mark the run — happens twice unless it is guarded. It is
+keyed on the interrupt id, and `tests/test_gate_resume.py` drives both passes and asserts
+the second writes nothing.
+
+That re-run is also useful rather than merely survivable: because `evaluate()` is called
+again, an owner who *tightens* a limit while a decision sits in their queue gets the new
+limit applied. A refund that was escalated at the old ceiling is refused at the new one.
+There is a test for that too.
+
+## Why not the built-in HumanInTheLoop handler
+
+The SDK ships `strands.vended_interventions.hitl`, which does the same pause on the same
+primitive. It decides *which* calls need a human two ways: an allow-list of tool names
+(with `"*"` and `"!tool"` patterns), or an LLM classifier that judges each call.
+
+Neither fits what this product claims. Authority here is a function of the **arguments**,
+not the tool: `issue_refund(amount=2500)` is the agent's to make and
+`issue_refund(amount=7500)` is not, and no allow-list can express the difference. And
+putting an LLM classifier in the authority path reintroduces exactly the thing the
+architecture removes — a model deciding what a model is allowed to do.
+
+The built-in handler also has no equivalent of `Deny`. It is approve-or-cancel on a
+confirmation; it cannot refuse a call outright with a reason the model reads and adapts
+to, which is what happens above the owner's ceiling.
+
+So `PolicyGate` uses the same `Confirm` → interrupt mechanism and replaces the
+tool-identity gate with a policy-and-arguments one. Worth noting one design detail
+borrowed by contrast: HITL's allow-list treats `"*"` as "approve everything", which
+silently disables gating. The risk table here fails the other way — a tool with no
+declared risk is treated as HIGH and denied.
+
 ## Transaction boundaries
 
 The agent's tools each open a short transaction and commit immediately. That is

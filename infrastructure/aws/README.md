@@ -36,6 +36,17 @@ If you later move paused-run storage to S3 (`OPS_AGENT_SESSION_S3_BUCKET`), add
 `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on
 `arn:aws:s3:::<bucket>/ops-agent/sessions/*`.
 
+## Credentials
+
+Four routes, in the SDK's own order of preference: environment variables
+(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optionally `AWS_SESSION_TOKEN`),
+`aws configure`, an IAM role on EC2/ECS/Lambda, or a **Bedrock API key** in
+`AWS_BEARER_TOKEN_BEDROCK`.
+
+The bearer token is the least friction if you only need model access — it is scoped to
+Bedrock and skips IAM user creation entirely. It does not change anything about the two
+sections below: geographic restrictions and model entitlement apply either way.
+
 ## Model access is no longer a manual step
 
 The Bedrock **Model access** page has been retired. Serverless foundation models are

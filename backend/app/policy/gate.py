@@ -129,11 +129,18 @@ class PolicyGate(InterventionHandler):
     # -- internals ---------------------------------------------------------
 
     def _open_approval(self, db, ctx, tool_name, tool_use_id, tool_input, ruling: Ruling) -> str:
-        """Create (or reuse) the pending decision for this tool call."""
+        """Create (or reuse) the pending decision for this tool call.
+
+        The early return is not an optimisation. An interrupt is re-execution, not
+        continuation: on resume the framework runs this handler again from the top and
+        only `interrupt()` returns early with the stored answer, so everything above the
+        `Confirm` happens twice. Keying on the interrupt id makes the second pass a
+        no-op — otherwise one escalation would ask the owner twice and count itself
+        twice in the audit trail. `tests/test_gate_resume.py` drives both passes.
+        """
         interrupt_id = interrupt_id_for(tool_use_id)
         existing = approval_service.find_by_interrupt(db, ctx.run_id, interrupt_id)
         if existing is not None:
-            # Second pass after a resume: the decision already exists.
             return existing.id
 
         approval = approval_service.create_approval(

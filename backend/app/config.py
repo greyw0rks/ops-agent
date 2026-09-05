@@ -47,7 +47,7 @@ class Settings(BaseSettings):
         default="us-west-2",
         validation_alias=AliasChoices("OPS_AWS_REGION", "AWS_REGION", "AWS_DEFAULT_REGION"),
     )
-    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    bedrock_model_id: str = "global.anthropic.claude-sonnet-4-6"
 
     # Anthropic-compatible endpoint, used when model_provider == "anthropic".
     compat_api_key: str = ""

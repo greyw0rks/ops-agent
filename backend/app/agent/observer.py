@@ -4,6 +4,15 @@
 every tool the agent actually executes. Blocked and escalated calls are recorded
 by the policy gate instead, so this hook skips those to avoid double entries.
 
+Two SDK behaviours this depends on, both documented:
+
+* `AfterToolCallEvent` is **not** fired for a tool that was interrupted, which is why
+  the gate has to write the `awaiting_approval` row itself.
+* This is `AfterToolCallEvent`, not `AfterToolsEvent`. The latter fires once per
+  event-loop cycle rather than once per logical batch, so an interrupt splits one
+  assistant message across two cycles and a side-effecting hook there would record
+  twice.
+
 The result is that the dashboard's activity feed is generated from what happened,
 not from the model's own account of what happened.
 """

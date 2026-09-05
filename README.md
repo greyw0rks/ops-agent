@@ -170,9 +170,13 @@ configuration. (It can, and it did, which is why the prefix exists.)
 ```bash
 OPS_MODEL_PROVIDER=bedrock
 OPS_AWS_REGION=us-west-2
-OPS_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
-# credentials come from the standard AWS chain
+OPS_BEDROCK_MODEL_ID=global.anthropic.claude-sonnet-4-6
+# credentials come from the standard AWS chain, or set AWS_BEARER_TOKEN_BEDROCK
 ```
+
+`make preflight --list` prints the inference-profile ids your account can actually
+invoke, which is the right way to pick that value — most current models are
+profile-only, so the bare model id is not what you pass.
 
 **Any Anthropic-compatible endpoint** — for development without Bedrock access:
 
@@ -343,6 +347,13 @@ structural work here:
   The docstring is the model's only manual, so each one says when to reach for the
   tool and what not to do with it. A test enforces that they are substantive.
 
+The SDK ships a `HumanInTheLoop` handler that pauses on the same primitive. It is not
+used here because it gates on *tool identity* — an allow-list, or an LLM classifier —
+and authority in this product is a function of the *arguments*:
+`issue_refund(amount=2500)` is the agent's call and `issue_refund(amount=7500)` is not.
+[docs/architecture.md](docs/architecture.md#why-not-the-built-in-humanintheloop-handler)
+has the full reasoning.
+
 `interrupt_id_for()` in the gate reproduces the id Strands will generate, so the
 approval row exists *before* the run pauses and the owner's queue is never behind the
 agent's state. A test pins that against the SDK's own `_interrupt_id`, so an upgrade
@@ -361,7 +372,7 @@ ops-agent/
 │   │   ├── api/            FastAPI routes: events, approvals, dashboard data
 │   │   └── db/             models, enums, session
 │   ├── scripts/            init_db, seed, simulate_event, worker, preflight_bedrock
-│   └── tests/              59 tests: policy, bookings, pricing, gate, conversations
+│   └── tests/              66 tests: policy, bookings, pricing, gate, resume, conversations
 ├── frontend/               Next.js dashboard — Today, Decisions, Activity, Rules
 ├── infrastructure/aws/     scoped IAM policy and the Bedrock notes
 ├── docs/                   architecture, design, tools, workflows, demo script
@@ -388,15 +399,21 @@ is what the scripts and the examples above do.
 ## Tests
 
 ```bash
-make test    # 59 tests
+make test    # 66 tests
 make lint
 ```
 
 They run against real Postgres inside a rolled-back transaction, so they exercise the
-actual SQL and constraints. The ones worth reading are `tests/test_policy.py` — the
-executable specification of what the agent may and may not do — and
-`tests/test_gate.py`, which checks that the service layer still refuses an
-out-of-bounds write even if the gate were bypassed entirely.
+actual SQL and constraints. Three worth reading:
+
+- `tests/test_policy.py` — the executable specification of what the agent may and may
+  not do. Every band, ceiling and window, as an assertion.
+- `tests/test_gate_resume.py` — an interrupt is re-execution, not continuation, so the
+  gate's handler runs twice for one escalation. These drive both passes and assert the
+  second writes nothing, and that a limit tightened mid-pause is applied on resume.
+- `tests/test_gate.py` — the service layer still refuses an out-of-bounds write even if
+  the gate were bypassed entirely, plus a check that the interrupt id we predict matches
+  the one the SDK generates.
 
 ## Status
 
