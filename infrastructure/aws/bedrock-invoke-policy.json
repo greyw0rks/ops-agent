@@ -2,14 +2,14 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "InvokeAnthropicModels",
+      "Sid": "InvokeFoundationModels",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel",
         "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": [
-        "arn:aws:bedrock:*::foundation-model/anthropic.*",
+        "arn:aws:bedrock:*::foundation-model/*",
         "arn:aws:bedrock:*:*:inference-profile/*"
       ]
     },
@@ -19,7 +19,8 @@
       "Action": [
         "bedrock:ListFoundationModels",
         "bedrock:GetFoundationModel",
-        "bedrock:ListInferenceProfiles"
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile"
       ],
       "Resource": "*"
     }

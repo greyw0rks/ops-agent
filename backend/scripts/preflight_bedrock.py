@@ -76,56 +76,143 @@ def check_bedrock(session, region: str) -> list[dict]:
     """Step 3: does this identity have Bedrock access in this region?"""
     control = session.client("bedrock", region_name=region)
     try:
-        response = control.list_foundation_models(byProvider="anthropic")
+        response = control.list_foundation_models()
     except ClientError as exc:
         code = exc.response["Error"]["Code"]
         if code in ("AccessDeniedException", "UnauthorizedOperation"):
             fail(
                 f"Bedrock refused this identity in {region}: {code}",
                 "The identity needs bedrock:ListFoundationModels and",
-                "bedrock:InvokeModelWithResponseStream. Attach AmazonBedrockFullAccess",
-                "or an equivalent inline policy.",
+                "bedrock:InvokeModelWithResponseStream. Attach the policy in",
+                "infrastructure/aws/bedrock-invoke-policy.json.",
             )
         fail(f"Bedrock call failed in {region}: {exc}")
     except NoRegionError:
         fail("No region set.", "Set OPS_AWS_REGION or AWS_REGION.")
 
-    models = response.get("modelSummaries", [])
-    line(OK, f"bedrock reachable in {region}", f"{len(models)} Anthropic model(s) listed")
+    models = [m for m in response.get("modelSummaries", []) if "TEXT" in m.get("outputModalities", [])]
+    line(OK, f"bedrock reachable in {region}", f"{len(models)} text model(s) listed")
     return models
 
 
-def show_models(models: list[dict]) -> None:
-    """Print what is actually available, newest-looking first."""
+def show_models(session, models: list[dict], region: str) -> None:
+    """Print what is actually invokable.
+
+    `list_foundation_models` is misleading on its own: most current models are
+    `INFERENCE_PROFILE` only, so the id you can actually pass is the profile id, not
+    the model id. This lists the profiles, which is the answer to "what do I put in
+    OPS_BEDROCK_MODEL_ID".
+    """
     print()
-    print(f"  {BOLD}Anthropic models visible to this account{RESET}")
-    for model in sorted(models, key=lambda m: m["modelId"], reverse=True):
-        streaming = "stream" if model.get("responseStreamingSupported") else f"{GREY}no-stream{RESET}"
-        inference = ",".join(model.get("inferenceTypesSupported", []))
-        print(f"    {model['modelId']:<58} {streaming:<12} {GREY}{inference}{RESET}")
-    print()
-    print(f"  {GREY}Cross-region inference profiles are prefixed us. / eu. / apac.{RESET}")
-    print(f"  {GREY}Those are usually what you want for Sonnet — set OPS_BEDROCK_MODEL_ID.{RESET}")
+    print(f"  {BOLD}Invokable inference profiles in {region}{RESET}")
+    control = session.client("bedrock", region_name=region)
+    try:
+        profiles: list[dict] = []
+        for page in control.get_paginator("list_inference_profiles").paginate(
+            typeEquals="SYSTEM_DEFINED"
+        ):
+            profiles += page.get("inferenceProfileSummaries", [])
+    except ClientError as exc:
+        line(WARN, "could not list inference profiles", str(exc))
+        profiles = []
+
+    for profile in sorted(profiles, key=lambda p: p["inferenceProfileId"]):
+        if profile.get("status") != "ACTIVE":
+            continue
+        print(f"    {profile['inferenceProfileId']}")
+
+    on_demand = [
+        m["modelId"] for m in models if "ON_DEMAND" in m.get("inferenceTypesSupported", [])
+    ]
+    if on_demand:
+        print()
+        print(f"  {BOLD}Also invokable directly (ON_DEMAND){RESET}")
+        for model_id in sorted(on_demand):
+            print(f"    {model_id}")
     print()
 
 
 def check_model_enabled(models: list[dict], model_id: str) -> None:
-    """Step 4: is the configured model one this account can actually use?"""
+    """Is the configured model one this account can see at all?"""
     ids = {m["modelId"] for m in models}
     if model_id in ids:
         line(OK, "configured model is listed", model_id)
         return
 
-    # Inference-profile ids (us.anthropic.…) are not returned by
-    # list_foundation_models; they wrap a base model that is.
-    base = model_id.split(".", 1)[1] if model_id.split(".", 1)[0] in ("us", "eu", "apac") else None
-    if base and base in ids:
+    # Inference-profile ids (us./eu./apac./global.) wrap a base model that is listed.
+    prefix, _, base = model_id.partition(".")
+    if prefix in ("us", "eu", "apac", "global") and base in ids:
         line(OK, "configured model is a cross-region profile", f"{model_id} → {base}")
         return
 
     line(WARN, "configured model was not in the list", model_id)
-    print(f"    {GREY}Run with --list to see what is available, then set OPS_BEDROCK_MODEL_ID.{RESET}")
-    print(f"    {GREY}A model can also be listed but not enabled — --invoke is the real test.{RESET}")
+    print(f"    {GREY}Run with --list to see what is invokable, then set OPS_BEDROCK_MODEL_ID.{RESET}")
+
+
+TOOL_PROBE = {
+    "tools": [
+        {
+            "toolSpec": {
+                "name": "check_availability",
+                "description": "Check available appointment slots for a service on a date.",
+                "inputSchema": {
+                    "json": {
+                        "type": "object",
+                        "properties": {
+                            "service_id": {"type": "string"},
+                            "date": {"type": "string", "description": "YYYY-MM-DD"},
+                        },
+                        "required": ["service_id", "date"],
+                    }
+                },
+            }
+        }
+    ]
+}
+
+
+def probe_tools(session, region: str, model_ids: list[str]) -> None:
+    """Check that a candidate model actually calls a tool rather than describing one.
+
+    This is the only capability the agent genuinely requires. A model that answers in
+    prose instead of emitting a toolUse block is unusable here regardless of how it
+    scores on anything else.
+    """
+    runtime = session.client("bedrock-runtime", region_name=region)
+    print()
+    print(f"  {BOLD}Tool-use probe{RESET}  {GREY}one call each{RESET}")
+    for model_id in model_ids:
+        try:
+            response = runtime.converse(
+                modelId=model_id,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": "Is svc_1 free on 2026-09-12? Check availability."}],
+                    }
+                ],
+                toolConfig=TOOL_PROBE,
+                inferenceConfig={"maxTokens": 512, "temperature": 0},
+            )
+        except ClientError as exc:
+            code = exc.response["Error"]["Code"]
+            message = exc.response["Error"].get("Message", "")[:64]
+            print(f"    {FAIL} {model_id:<46} {GREY}{code}: {message}{RESET}")
+            continue
+
+        called = [
+            block["toolUse"]["name"]
+            for block in response["output"]["message"]["content"]
+            if "toolUse" in block
+        ]
+        usage = response.get("usage", {})
+        if called:
+            print(
+                f"    {OK} {model_id:<46} called {called} "
+                f"{GREY}({usage.get('inputTokens')}in/{usage.get('outputTokens')}out){RESET}"
+            )
+        else:
+            print(f"    {WARN} {model_id:<46} {GREY}answered in prose, no tool call{RESET}")
 
 
 def check_invoke(session, region: str, model_id: str) -> None:
@@ -165,10 +252,25 @@ def check_invoke(session, region: str, model_id: str) -> None:
     line(OK, "invoke succeeded", f"{text!r} ({usage.get('inputTokens')}in/{usage.get('outputTokens')}out)")
 
 
+#: Models worth considering for this agent, strongest all-AWS story first. Probed with
+#: --tools so the choice is made on what a model does, not on what it claims. Anthropic
+#: and OpenAI are omitted deliberately: both refuse requests from countries their
+#: providers do not serve, independently of AWS, so they are not portable choices here.
+TOOL_CANDIDATES = [
+    "us.amazon.nova-premier-v1:0",
+    "us.amazon.nova-pro-v1:0",
+    "us.amazon.nova-2-lite-v1:0",
+    "us.meta.llama4-maverick-17b-instruct-v1:0",
+    "us.mistral.pixtral-large-2502-v1:0",
+    "us.xai.grok-4.6",
+]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--list", action="store_true", help="show every Anthropic model available")
+    parser.add_argument("--list", action="store_true", help="show every invokable model id")
     parser.add_argument("--invoke", action="store_true", help="send a real request (costs a few tokens)")
+    parser.add_argument("--tools", action="store_true", help="probe candidates for real tool use")
     parser.add_argument("--region", help="override OPS_AWS_REGION for this check")
     parser.add_argument("--model", help="override OPS_BEDROCK_MODEL_ID for this check")
     args = parser.parse_args()
@@ -187,15 +289,18 @@ def main() -> None:
         fail("No AWS credentials found.", "aws configure")
 
     if args.list:
-        show_models(models)
+        show_models(session, models, region)
 
     check_model_enabled(models, model_id)
 
+    if args.tools:
+        probe_tools(session, region, [model_id, *(m for m in TOOL_CANDIDATES if m != model_id)])
+
     if args.invoke:
         check_invoke(session, region, model_id)
-    else:
+    elif not args.tools:
         print()
-        print(f"  {GREY}Add --invoke to prove it end to end (sends one real request).{RESET}")
+        print(f"  {GREY}Add --invoke to prove it end to end, or --tools to compare models.{RESET}")
 
     print()
     if settings.model_provider.lower() != "bedrock":
